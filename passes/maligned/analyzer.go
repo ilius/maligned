@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"go/types"
 	"sort"
+	"strings"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -40,17 +41,27 @@ func malign(pass *analysis.Pass, pos token.Pos, str *types.Struct) {
 	maxAlign := pass.TypesSizes.Alignof(unsafePointerTyp)
 
 	s := gcSizes{wordSize, maxAlign}
-	optsz, optptrs := optimalOrder(str, &s)
+	optsz, optptrs, optimal := optimalOrder(str, &s)
 
 	if sz := s.Sizeof(str); sz != optsz {
 		pass.Reportf(pos, "struct of size %d could be %d", sz, optsz)
 	}
 	if ptrs := s.ptrdata(str); ptrs != optptrs {
-		pass.Reportf(pos, "struct with %d pointer bytes could be %d", ptrs, optptrs)
+		names := make([]string, optimal.NumFields())
+		for i := 0; i < optimal.NumFields(); i++ {
+			names[i] = optimal.Field(i).Name()
+		}
+		pass.Reportf(
+			pos,
+			"struct with %d pointer bytes could be %d, fields: %s",
+			ptrs,
+			optptrs,
+			strings.Join(names, ", "),
+		)
 	}
 }
 
-func optimalOrder(str *types.Struct, sizes *gcSizes) (int64, int64) {
+func optimalOrder(str *types.Struct, sizes *gcSizes) (int64, int64, *types.Struct) {
 	nf := str.NumFields()
 
 	type elem struct {
@@ -124,7 +135,7 @@ func optimalOrder(str *types.Struct, sizes *gcSizes) (int64, int64) {
 	}
 	optimal := types.NewStruct(fields, nil)
 
-	return sizes.Sizeof(optimal), sizes.ptrdata(optimal)
+	return sizes.Sizeof(optimal), sizes.ptrdata(optimal), optimal
 }
 
 // Code below based on go/types.StdSizes.
